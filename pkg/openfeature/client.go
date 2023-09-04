@@ -10,6 +10,8 @@ import (
 	"github.com/go-logr/logr"
 )
 
+type BooleanCallback func() bool
+
 // IClient defines the behaviour required of an openfeature client
 type IClient interface {
 	Metadata() ClientMetadata
@@ -19,6 +21,7 @@ type IClient interface {
 	SetEvaluationContext(evalCtx EvaluationContext)
 	EvaluationContext() EvaluationContext
 	BooleanValue(ctx context.Context, flag string, defaultValue bool, evalCtx EvaluationContext, options ...Option) (bool, error)
+	BooleanValueCallback(ctx context.Context, flag string, defaultValue BooleanCallback, evalCtx EvaluationContext, options ...Option) (bool, error)
 	StringValue(ctx context.Context, flag string, defaultValue string, evalCtx EvaluationContext, options ...Option) (string, error)
 	FloatValue(ctx context.Context, flag string, defaultValue float64, evalCtx EvaluationContext, options ...Option) (float64, error)
 	IntValue(ctx context.Context, flag string, defaultValue int64, evalCtx EvaluationContext, options ...Option) (int64, error)
@@ -292,15 +295,10 @@ func WithHookHints(hookHints HookHints) Option {
 // - evalCtx is the evaluation context used in a flag evaluation (not to be confused with ctx)
 // - options are optional additional evaluation options e.g. WithHooks & WithHookHints
 func (c *Client) BooleanValue(ctx context.Context, flag string, defaultValue bool, evalCtx EvaluationContext, options ...Option) (bool, error) {
-	c.mx.RLock()
-	defer c.mx.RUnlock()
-
-	evalOptions := &EvaluationOptions{}
-	for _, option := range options {
-		option(evalOptions)
+	evalDetails, err := c.resolve(ctx, flag, Boolean, defaultValue, evalCtx, options...)
+	if err != nil {
+		return defaultValue, err
 	}
-
-	evalDetails, err := c.evaluate(ctx, flag, Boolean, defaultValue, evalCtx, *evalOptions)
 	if err != nil {
 		return defaultValue, err
 	}
@@ -316,6 +314,35 @@ func (c *Client) BooleanValue(ctx context.Context, flag string, defaultValue boo
 	}
 
 	return value, nil
+}
+
+func (c *Client) BooleanValueCallback(ctx context.Context, flag string, defaultValue BooleanCallback, evalCtx EvaluationContext, options ...Option) (bool, error) {
+	evalDetails, err := c.resolve(ctx, flag, Boolean, false, evalCtx, options...)
+	if err != nil {
+		return defaultValue(), err
+	}
+	value, ok := evalDetails.Value.(bool)
+	if !ok {
+		err := errors.New("evaluated value is not a boolean")
+		c.logger().Error(
+			err, "invalid flag resolution type", "expectedType", "bool",
+			"gotType", fmt.Sprintf("%T", evalDetails.Value),
+		)
+		return defaultValue(), err
+	}
+
+	return value, nil
+}
+
+func (c *Client) resolve(ctx context.Context, flag string, flagType Type, defaultValue interface{}, evalCtx EvaluationContext, options ...Option) (InterfaceEvaluationDetails, error) {
+	c.mx.RLock()
+	defer c.mx.RUnlock()
+
+	evalOptions := &EvaluationOptions{}
+	for _, option := range options {
+		option(evalOptions)
+	}
+	return c.evaluate(ctx, flag, Boolean, defaultValue, evalCtx, *evalOptions)
 }
 
 // StringValue performs a flag evaluation that returns a string.
