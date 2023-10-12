@@ -4,9 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
-
 	"github.com/open-feature/go-sdk/pkg/openfeature"
+	"log"
 )
 
 func ExampleNewClient() {
